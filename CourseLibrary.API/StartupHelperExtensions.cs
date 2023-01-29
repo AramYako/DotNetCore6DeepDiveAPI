@@ -1,6 +1,9 @@
 ﻿using CourseLibrary.API.DbContexts;
 using CourseLibrary.API.Services;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
+using Newtonsoft.Json.Serialization;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace CourseLibrary.API;
 
@@ -9,9 +12,17 @@ internal static class StartupHelperExtensions
     // Add services to the container
     public static WebApplication ConfigureServices(this WebApplicationBuilder builder)
     {
-        builder.Services.AddControllers();
+        builder.Services.AddControllers(configure =>
+        {
+            configure.ReturnHttpNotAcceptable = true; //406 if accept header is not supported
+        })
+        .AddNewtonsoftJson(setupAction =>
+        {
+            setupAction.SerializerSettings.ContractResolver = new CamelCasePropertyNamesContractResolver();
+        })
+        .AddXmlDataContractSerializerFormatters();
 
-        builder.Services.AddScoped<ICourseLibraryRepository, 
+        builder.Services.AddScoped<ICourseLibraryRepository,
             CourseLibraryRepository>();
 
         builder.Services.AddDbContext<CourseLibraryContext>(options =>
@@ -27,17 +38,32 @@ internal static class StartupHelperExtensions
 
     // Configure the request/response pipelien
     public static WebApplication ConfigurePipeline(this WebApplication app)
-    { 
+    {
         if (app.Environment.IsDevelopment())
         {
             app.UseDeveloperExceptionPage();
         }
- 
+        else
+        {
+            app.UseExceptionHandler(exceptionHandlerApp =>
+            {
+                exceptionHandlerApp.Run(async context =>
+                {
+                    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+
+                    // using static System.Net.Mime.MediaTypeNames;
+                    context.Response.ContentType = Text.Plain;
+
+                    await context.Response.WriteAsync("An exception was thrown.");
+                });
+            });
+        }
+
         app.UseAuthorization();
 
-        app.MapControllers(); 
-         
-        return app; 
+        app.MapControllers();
+
+        return app;
     }
 
     public static async Task ResetDatabaseAsync(this WebApplication app)
@@ -58,6 +84,6 @@ internal static class StartupHelperExtensions
                 var logger = scope.ServiceProvider.GetRequiredService<ILogger>();
                 logger.LogError(ex, "An error occurred while migrating the database.");
             }
-        } 
+        }
     }
 }
